@@ -1,63 +1,76 @@
-import { getUnits } from "./api.js";
+
+import { convertValue } from "./conversion.js";
+import { getUnits, saveHistory, getHistory } from "./api.js";
+
+let isUserTyping = false;
+let currentType = "Length";
+let lastResult = "";
+let lastValue = "";   // NEW (store input)
+let isLoadingUnits = false;
+
+// INIT
 document.addEventListener("DOMContentLoaded", async () => {
-
-    // STATE OBJECT
-    const state = {
-        type: "Length",
-        action: "Conversion",
-        fromVal: null,
-        fromUnit: "",
-        toVal: null,
-        toUnit: "",
-        operator: "+"
-    };
-
-    // INITIAL CALLS
     attachEventListeners();
-    await loadUnits("Length");
-    toggleOperators(false);
+    await loadUnits(currentType);
     loadHistory();
-
+    
 });
+
+// EVENTS
 function attachEventListeners() {
 
-    // TYPE CHANGE
+    const fromInput = document.querySelectorAll(".box input")[0];
+
+    fromInput.addEventListener("input", () => {
+        isUserTyping = true;
+        lastValue = fromInput.value;   // store value
+        handleConversion();
+    });
+
     const typeRadios = document.querySelectorAll('input[name="type"]');
 
     typeRadios.forEach(radio => {
         radio.addEventListener("change", async (e) => {
-            const selectedType = e.target.id;
-            await loadUnits(capitalize(selectedType));
-        });
-    });
 
-    // ACTION CHANGE
-    const actionRadios = document.querySelectorAll('input[name="action"]');
+            const selectedType = capitalize(e.target.id);
 
-    actionRadios.forEach(radio => {
-        radio.addEventListener("change", (e) => {
-            const action = e.target.id;
+            if (selectedType === currentType) return;
 
-            if (action === "arithmetic") {
-                toggleOperators(true);
-            } else {
-                toggleOperators(false);
+            currentType = selectedType;
+
+            await loadUnits(selectedType);
+
+            // RESTORE VALUE + RESULT AFTER UI CHANGE
+            const fromInput = document.querySelectorAll(".box input")[0];
+            const toInput = document.querySelectorAll(".box input")[1];
+
+            if (lastValue !== "") {
+                fromInput.value = lastValue;
+            }
+
+            if (lastResult !== "") {
+                toInput.value = lastResult;
             }
         });
     });
 }
+
+// LOAD UNITS
 async function loadUnits(type) {
+
+    isLoadingUnits = true;
 
     const units = await getUnits(type);
 
     if (!units || units.length === 0) {
-        alert("No units found or server error");
+        alert("No units found");
+        isLoadingUnits = false;
         return;
     }
 
     const selects = document.querySelectorAll(".box select");
 
-    selects.forEach(select => {
+    selects.forEach((select) => {
         select.innerHTML = "";
 
         units.forEach(unit => {
@@ -67,52 +80,92 @@ async function loadUnits(type) {
             select.appendChild(option);
         });
     });
+
+    isLoadingUnits = false;
 }
-// async function loadUnits(type) {
-//     try {
-//         // const res = await fetch("http://localhost:3000/units");
-//         // const data = await res.json();
 
-//         const filtered = data.filter(u => u.type === type);
+// CONVERSION
+async function handleConversion() {
 
-//         const selects = document.querySelectorAll(".box select");
+    if (isLoadingUnits) return;
 
-//         selects.forEach(select => {
-//             select.innerHTML = "";
+    const fromInput = document.querySelectorAll(".box input")[0];
+    const toInput = document.querySelectorAll(".box input")[1];
 
-//             filtered.forEach(unit => {
-//                 const option = document.createElement("option");
-//                 option.value = unit.symbol;
-//                 option.textContent = unit.label;
-//                 select.appendChild(option);
-//             });
-//         });
+    const fromSelect = document.querySelectorAll(".box select")[0];
+    const toSelect = document.querySelectorAll(".box select")[1];
 
-//     } catch (error) {
-//         alert("Server unavailable");
-//         console.error(error);
-//     }
-// }
-function toggleOperators(show) {
-    const operatorRow = document.getElementById("operator-row");
+    const value = parseFloat(fromInput.value);
+    const fromUnit = fromSelect.value;
+    const toUnit = toSelect.value;
 
-    if (!operatorRow) return;
+    if (isNaN(value) || !fromUnit || !toUnit) {
+        if (lastResult !== "") {
+            toInput.value = lastResult;
+        }
+        return;
+    }
 
-    operatorRow.style.display = show ? "flex" : "none";
-}
-async function loadHistory() {
-    try {
-        const res = await fetch("http://localhost:3000/history");
-        const history = await res.json();
+    const result = await convertValue(value, fromUnit, toUnit);
 
-        console.log("History:", history);
+    if (result !== null) {
 
-        // Later you will render it in UI
+        const finalResult = parseFloat(result.toFixed(4));
 
-    } catch (error) {
-        console.error("Error loading history", error);
+        // store values
+        lastResult = finalResult;
+        lastValue = value;
+
+        // show result
+        toInput.value = finalResult;
+
+        if (!isUserTyping) return;
+
+        const selectedType = document.querySelector('input[name="type"]:checked').id;
+        const selectedAction = document.querySelector('input[name="action"]:checked').id;
+
+        const record = {
+            type: capitalize(selectedType),
+            action: capitalize(selectedAction),
+            expression: `${value} ${fromUnit} → ${toUnit}`,
+            result: finalResult,
+            timestamp: new Date().toISOString()
+        };
+
+        try {
+            await saveHistory(record);
+            loadHistory(); // refresh history after save
+        } catch (error) {
+            console.error("History save failed:", error);
+        }
+
+        isUserTyping = false;
     }
 }
+
+// HELPER
 function capitalize(text) {
     return text.charAt(0).toUpperCase() + text.slice(1);
+}
+async function loadHistory() {
+
+    const container = document.getElementById("historyContainer");
+
+    if (!container) return; // safety
+
+    const history = await getHistory();
+
+    if (!history || history.length === 0) {
+        container.innerHTML = "<p>No history yet.</p>";
+        return;
+    }
+
+    container.innerHTML = "";
+
+    history.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "history-item";
+        div.textContent = `${item.expression} = ${item.result}`;
+        container.appendChild(div);
+    });
 }
