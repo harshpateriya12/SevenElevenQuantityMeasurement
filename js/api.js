@@ -1,23 +1,53 @@
-function loadImages() {
-  if (isLoading) return;
+const BASE_URL = "http://localhost:3000";
 
-  isLoading = true;
+export async function getUnits(type) {
+    try {
+        const res = await fetch(`${BASE_URL}/units?type=${type}`);
 
-  // Always generate next batch (looping data)
-  const nextBatch = [];
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
 
-  for (let i = 0; i < batchSize; i++) {
-    const index = (currentIndex + i) % filteredData.length;
-    nextBatch.push(filteredData[index]);
-  }
+        return await res.json();
 
-  nextBatch.forEach(item => {
-    const img = document.createElement("img");
-    img.src = item.url;
-    img.loading = "lazy";
-    gallery.appendChild(img);
-  });
+    } catch (error) {
+        console.error("API Error (getUnits):", error);
+        return [];
+    }
+}
 
-  currentIndex += batchSize;
-  isLoading = false;
+
+export async function getConversion(from, to) {
+    try {
+
+        // SAME UNIT CASE
+        if (from === to) {
+            return {
+                from,
+                to,
+                factor: 1,
+                formula: null
+            };
+        }
+
+        const res = await fetch(
+            `${BASE_URL}/conversions?from=${from}&to=${to}`
+        );
+
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json(); // always array
+
+        if (!data.length) {
+            throw new Error("No conversion found");
+        }
+
+        return data[0];
+
+    } catch (error) {
+        console.error("API Error (getConversion):", error);
+        throw error;
+    }
 }
